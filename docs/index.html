@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="A private, browser-based workspace for editing and organizing PDFs.">
+  <meta name="theme-color" content="#f8f9f6">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' blob: data:; img-src 'self' blob: data:; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Paperwork — PDF Editor</title>
+  <link rel="icon" href="./mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./styles.css">
+  <script defer src="./vendor/pdf-lib.min.js"></script>
+  <script type="module" src="./app.mjs"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><img src="./mark.svg" width="37" height="37" alt=""><div><h1>Paperwork<span>.</span></h1><p>PDF WORKSPACE</p></div></div>
+    <div class="file-name" id="file-name" hidden><i data-icon="file"></i><span></span></div>
+    <div class="header-actions">
+      <button id="open" class="button quiet"><i data-icon="folder"></i><span>Open PDF</span></button>
+      <button id="download" class="button primary" disabled><i data-icon="download"></i><span>Download<span class="desktop-label"> PDF</span></span></button>
+    </div>
+  </header>
+
+  <nav class="toolbar" aria-label="Editing tools">
+    <div class="tools">
+      <button id="toggle-pages" class="icon-button sidebar-toggle" aria-label="Toggle pages sidebar" aria-controls="sidebar" aria-expanded="true" title="Toggle pages sidebar"><i data-icon="sidebar"></i></button>
+      <span class="divider sidebar-toggle"></span>
+      <button class="tool active" data-tool="select" aria-pressed="true" title="Select (V)" disabled><i data-icon="cursor"></i><span>Select</span></button>
+      <span class="divider"></span>
+      <button class="tool" data-tool="text" aria-pressed="false" title="Add text (T)" disabled><i data-icon="text"></i><span>Text</span></button>
+      <button class="tool" data-tool="ink" aria-pressed="false" title="Draw (D)" disabled><i data-icon="pen"></i><span>Draw</span></button>
+      <button class="tool" data-tool="highlight" aria-pressed="false" title="Highlight (H)" disabled><i data-icon="highlight"></i><span>Highlight</span></button>
+      <button class="tool" data-tool="shape" aria-pressed="false" title="Rectangle (R)" disabled><i data-icon="square"></i><span>Shape</span></button>
+      <button class="tool" data-tool="whiteout" aria-pressed="false" title="Whiteout (W)" disabled><i data-icon="eraser"></i><span>Whiteout</span></button>
+    </div>
+    <div class="history">
+      <span class="divider"></span>
+      <button id="undo" class="icon-button" aria-label="Undo" title="Undo (Ctrl+Z)" disabled><i data-icon="undo"></i></button>
+      <button id="redo" class="icon-button" aria-label="Redo" title="Redo (Ctrl+Shift+Z)" disabled><i data-icon="redo"></i></button>
+    </div>
+  </nav>
+
+  <div class="workspace">
+    <aside id="sidebar" class="sidebar" aria-label="Document pages">
+      <div class="sidebar-title"><h2>Pages</h2><span id="page-count" class="count">0</span></div>
+      <div id="page-list" class="page-list" aria-label="Page thumbnails"></div>
+      <div id="sidebar-empty" class="sidebar-empty"><i data-icon="pages"></i><p>No pages yet</p><small>Open a PDF to get started.</small></div>
+      <div id="page-actions" class="page-actions" hidden>
+        <div class="page-action-row">
+          <button id="move-up" class="icon-button" aria-label="Move page earlier" title="Move page earlier"><i data-icon="arrow-up"></i></button>
+          <button id="move-down" class="icon-button" aria-label="Move page later" title="Move page later"><i data-icon="arrow-down"></i></button>
+          <button id="rotate" class="icon-button" aria-label="Rotate page clockwise" title="Rotate page clockwise"><i data-icon="rotate"></i></button>
+          <button id="delete-page" class="icon-button danger" aria-label="Delete page" title="Delete page"><i data-icon="trash"></i></button>
+        </div>
+        <button id="add-page" class="button add-page"><i data-icon="plus"></i>Add blank page</button>
+      </div>
+    </aside>
+
+    <main id="workspace-main" class="workspace-main" aria-label="PDF editor">
+      <div class="context-bar" id="context-bar" hidden>
+        <span id="tool-hint"></span>
+        <div id="tool-options" class="tool-options">
+          <label id="color-option" class="option">Color <input id="color" type="color" value="#17634e"></label>
+          <label id="size-option" class="option"><span id="size-label">Size</span> <select id="size" aria-labelledby="size-label"></select></label>
+          <button id="edit-mark" class="button small" hidden>Edit text</button>
+          <button id="remove-mark" class="icon-button danger" aria-label="Delete selected mark" title="Delete selected mark (Delete)" hidden><i data-icon="trash"></i></button>
+        </div>
+      </div>
+      <div id="stage" class="stage" tabindex="0" aria-label="Document canvas">
+        <section id="empty" class="empty">
+          <div class="empty-card" id="drop-zone">
+            <div class="illustration" aria-hidden="true">
+              <svg width="180" height="112" viewBox="0 0 180 112" fill="none">
+                <path d="M23 61H35M29 55V67M142 27H154M148 21V33" stroke="#4c9b7a" stroke-width="1.6" stroke-linecap="round"/>
+                <circle cx="37" cy="26" r="2.2" fill="#86c7a8"/><circle cx="149" cy="79" r="3" stroke="#85bfa3" stroke-width="1.4"/>
+                <rect x="45" y="22" width="61" height="72" rx="7" transform="rotate(-13 45 22)" fill="#e4ede5" stroke="#b7ccbd"/>
+                <rect x="74" y="18" width="61" height="75" rx="7" transform="rotate(10 74 18)" fill="#d9efe3" stroke="#b0d3c0"/>
+                <path d="M64 19a7 7 0 0 1 7-7h36l17 17v60a7 7 0 0 1-7 7H71a7 7 0 0 1-7-7V19Z" fill="#fff" stroke="#71a48d" stroke-width="1.4"/>
+                <path d="M107 12v13a4 4 0 0 0 4 4h13" fill="#d9efe3" stroke="#71a48d" stroke-width="1.4" stroke-linejoin="round"/>
+                <path d="M77 44h32m-32 8h25m-25 8h32" stroke="#bed1c7" stroke-width="2" stroke-linecap="round"/>
+                <path d="M78 79c6-11 10-11 8-3s2 5 6 0c3-4 1 6 7 2l5-3" stroke="#277a5b" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                <circle cx="123" cy="86" r="14" fill="#23684f" stroke="#fff" stroke-width="2"/><path d="M123 91V81m-4 4 4-4 4 4" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </div>
+            <span class="eyebrow">LOCAL PDF EDITOR</span>
+            <h2>Open a PDF to edit</h2>
+            <p>Drag and drop a PDF here, or choose a file<br class="desktop-label"> from your device.</p>
+            <button id="choose" class="button primary choose"><i data-icon="upload"></i>Choose a PDF</button>
+            <button id="demo" class="link-button">Try a sample PDF <i data-icon="arrow-right"></i></button>
+          </div>
+          <p class="privacy-note"><i data-icon="shield"></i>Your files stay on this device.</p>
+        </section>
+        <div id="paper-wrap" class="paper-wrap" hidden>
+          <div id="paper" class="paper">
+            <canvas id="pdf-canvas" aria-label="Current PDF page"></canvas>
+            <svg id="overlay" xmlns="http://www.w3.org/2000/svg" aria-label="Page annotations"></svg>
+          </div>
+          <div id="sheet-label" class="sheet-label"></div>
+        </div>
+      </div>
+      <div id="drop-indicator" class="drop-indicator" hidden><i data-icon="upload"></i>Drop your PDF to open it</div>
+      <div id="notice" class="notice" role="status" hidden></div>
+    </main>
+  </div>
+
+  <footer class="statusbar">
+    <span class="local"><span></span>On-device editing</span>
+    <div class="pagination" aria-label="Page navigation">
+      <button id="prev" class="icon-button" aria-label="Previous page" disabled><i data-icon="left"></i></button>
+      <span id="page-status">No document open</span>
+      <button id="next" class="icon-button" aria-label="Next page" disabled><i data-icon="right"></i></button>
+    </div>
+    <div class="zoom" aria-label="Zoom">
+      <button id="zoom-out" class="icon-button" aria-label="Zoom out" disabled><i data-icon="minus"></i></button>
+      <output id="zoom-value" aria-label="Zoom level">—</output>
+      <button id="zoom-in" class="icon-button" aria-label="Zoom in" disabled><i data-icon="plus"></i></button>
+      <button id="zoom-fit" class="icon-button" aria-label="Fit page" title="Fit page" disabled><i data-icon="fit"></i></button>
+    </div>
+  </footer>
+
+  <input id="file" type="file" accept=".pdf,application/pdf" hidden>
+  <dialog id="text-dialog" aria-labelledby="text-title">
+    <form id="text-form">
+      <h2 id="text-title">Add text</h2>
+      <label for="text-value">Text to place on the page</label>
+      <textarea id="text-value" rows="4" maxlength="1000" required></textarea>
+      <p id="text-error" class="form-error" role="alert" hidden></p>
+      <div class="dialog-actions"><button id="text-cancel" type="button" class="button quiet">Cancel</button><button class="button primary" type="submit" id="text-submit">Place text</button></div>
+    </form>
+  </dialog>
+  <dialog id="replace-dialog" aria-labelledby="replace-title">
+    <form method="dialog">
+      <h2 id="replace-title">Open a different PDF?</h2>
+      <p>There are edits in this workspace that you haven’t downloaded.</p>
+      <div class="dialog-actions"><button value="cancel" class="button quiet" autofocus>Keep editing</button><button value="open" class="button primary">Open anyway</button></div>
+    </form>
+  </dialog>
+</body>
+</html>
