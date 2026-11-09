@@ -5,6 +5,7 @@ const icons = {
   download:'<path d="M12 3v13m-5-5 5 5 5-5M4 16v5h16v-5"/>',
   sidebar:'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/>',
   cursor:'<path d="m4 3 15 10-7 1-3 7Z"/>', text:'<path d="M4 7V4h16v3M12 4v16m-4 0h8"/>',
+  'edit-text':'<path d="M3 7V4h14v3M10 4v15m-4 0h8m2-3 4-4 2 2-4 4-3 1Z"/>',
   pen:'<path d="m4 15 11-11a2.8 2.8 0 0 1 4 4L8 19l-5 2 1-6Zm9-9 4 4"/>',
   highlight:'<path d="m9 16-3 1-2-2 1-3L15 2l5 5-10 10Zm-3 1-3 3m9-14 5 5M9 21h11"/>',
   square:'<rect x="4" y="4" width="16" height="16" rx="2"/>',

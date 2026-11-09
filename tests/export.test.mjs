@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { test } from 'node:test';
 import { exportPdf, makeSample, validateText } from '../docs/pdf.mjs';
+import { listTextRuns, rewriteText } from '../docs/text-edit.mjs';
+import { init } from '../docs/vendor/pdfium/dist/index.browser.js';
 
 const require = createRequire(import.meta.url);
 const { PDFDocument, PDFRawStream, decodePDFRawStream } = globalThis.PDFLib = require('../docs/vendor/pdf-lib.min.js');
@@ -42,4 +45,31 @@ test('export removes a page and keeps the remaining original page', async () => 
 test('text validation rejects characters the export font cannot encode', async () => {
   await validateText('Café\nRésumé');
   await assert.rejects(()=>validateText('🦋'));
+});
+
+test('existing text is replaced in the saved PDF, including fallback glyphs and page reordering', async () => {
+  const [wasmBinary, fallback] = await Promise.all([
+    readFile(new URL('../docs/vendor/pdfium/dist/pdfium.wasm', import.meta.url)),
+    readFile(new URL('../docs/vendor/noto/NotoSans-Regular.ttf', import.meta.url)),
+  ]);
+  const engine = await init({ wasmBinary });
+  engine.PDFiumExt_Init();
+  const runtime = { engine, fallback };
+  const bytes = await makeSample();
+  const runs = listTextRuns(runtime, bytes, 0);
+  const title = runs.find(run => run.value === 'Field Notes');
+  const subtitle = runs.find(run => run.value === 'A small workspace for big ideas.');
+  const edits = [
+    { index: title.index, origin: title.origin, original: title.value, value: 'Updated title' },
+    { index: subtitle.index, origin: subtitle.origin, original: subtitle.value, value: 'Café, Ελληνικά, Ж' },
+  ];
+  const pages = [page(1), { ...page(0,90), textEdits: edits }];
+  const output = await exportPdf(rewriteText(runtime, bytes, pages), pages);
+  const reopened = listTextRuns(runtime, output, 1);
+  assert.equal(reopened.length, runs.length);
+  assert.deepEqual(reopened.find(run => run.value === edits[0].value).origin, title.origin);
+  assert.deepEqual(reopened.find(run => run.value === edits[1].value).origin, subtitle.origin);
+  assert.ok(reopened.some(run => run.value === 'NOTES'));
+  assert.ok(reopened.every(run => run.value !== title.value && run.value !== subtitle.value));
+  assert.ok(listTextRuns(runtime, output, 0).some(run => run.value === 'Make it yours'));
 });

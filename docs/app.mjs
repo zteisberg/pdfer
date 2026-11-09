@@ -1,5 +1,6 @@
 import './icons.mjs';
 import { openPdf, closePdf, makeSample, rotationOf, viewOf, viewMatrix, mapPoint, paintPage, validateText, exportPdf, BASELINE, LINE_HEIGHT } from './pdf.mjs';
+import { loadTextEngine, listTextRuns, paintEditedPage, rewriteText } from './text-edit.mjs';
 
 const $ = id => document.getElementById(id);
 const stage = $('stage'), paper = $('paper'), overlay = $('overlay'), canvas = $('pdf-canvas');
@@ -15,6 +16,8 @@ let state = { pages:[], active:null }, originalBytes, originalPages, doc, savedP
 let undo=[], redo=[], tool='select', selected=null, zoom=null, busy=false, drag, promptText;
 let renderTask, renderId=0, renderedPage, renderedScale, renderedRotation, noticeTimer, thumbsKey='';
 let thumbs=new Map(), thumbObserver, unloadHandlerAttached=false;
+const sourceRuns = new WeakMap();
+let textRuntime, renderedTextEdits;
 
 const current = () => state.pages.find(page => page.id === state.active);
 const activeIndex = () => state.pages.findIndex(page => page.id === state.active);
@@ -31,6 +34,14 @@ function notice(message, error=false, wait=4300) {
 }
 
 function protectEdits(e) { e.preventDefault(); e.returnValue=''; }
+
+function sourceTextHint(page) {
+  if (!page.proxy) return 'This page has no existing text.';
+  const entry = sourceRuns.get(page.proxy);
+  if (entry?.error) return 'Could not read editable text on this page.';
+  if (!entry?.runs) return 'Looking for editable text…';
+  return entry.runs.length ? 'Click an outlined text run to edit it.' : 'No editable text found on this page.';
+}
 
 function setSidebar(open) {
   $('sidebar').hidden=!open;
@@ -66,7 +77,8 @@ function updateControls() {
   }
   overlay.dataset.tool=tool;
   const mark=markSelected(), settings=tool==='select'?mark:prefs[tool], mode=mark?.type ?? tool;
-  $('tool-hint').textContent=mark?`${({ink:'Drawing',shape:'Rectangle',text:'Text',highlight:'Highlight',whiteout:'Whiteout'})[mark.type]} selected`:hints[tool];
+  $('tool-hint').textContent=tool==='edit-text'&&page?sourceTextHint(page):
+    mark?`${({ink:'Drawing',shape:'Rectangle',text:'Text',highlight:'Highlight',whiteout:'Whiteout'})[mark.type]} selected`:hints[tool];
   $('remove-mark').hidden=!mark; $('remove-mark').disabled=!canEdit;
   $('edit-mark').hidden=mark?.type!=='text'; $('edit-mark').disabled=!canEdit;
   $('color-option').hidden=!settings?.color||mode==='whiteout'; $('color').disabled=!canEdit;
@@ -132,12 +144,20 @@ function movePage(delta) {
 
 function setTool(name) {
   if (!editable()) return;
+  if (name==='edit-text' && sourceRuns.get(current().proxy)?.error) sourceRuns.delete(current().proxy);
   tool=name; selected=null; drag=null; updateControls(); drawOverlay();
 }
 
 function fitScale(page) {
   const view=viewOf(page), inset=mobile.matches?32:56;
   return Math.max(.02,Math.min(1.5,(stage.clientWidth-inset)/view.width,(stage.clientHeight-68)/view.height));
+}
+
+function paintWorkspacePage(page, target, scale, pixelRatio) {
+  const paintContent = page.textEdits?.length
+    ? () => paintEditedPage(textRuntime, originalBytes, page, target)
+    : undefined;
+  return paintPage(page, target, scale, pixelRatio, paintContent);
 }
 
 function renderPage() {
@@ -151,8 +171,9 @@ function renderPage() {
   $('zoom-in').disabled=!editable()||scale>=MAX_ZOOM;
   $('zoom-out').disabled=!editable()||scale<=MIN_ZOOM;
   drawOverlay();
-  if (renderedPage===page.id&&renderedScale===scale&&renderedRotation===rotation) return;
+  if (renderedPage===page.id&&renderedScale===scale&&renderedRotation===rotation&&renderedTextEdits===page.textEdits) return;
   renderedPage=page.id; renderedScale=scale; renderedRotation=rotation;
+  renderedTextEdits=page.textEdits;
   const id=++renderId;
   const oldTask=renderTask;
   if (oldTask) oldTask.cancel();
@@ -160,7 +181,7 @@ function renderPage() {
   Promise.resolve(oldTask?.promise).catch(()=>{}).then(async()=>{
     if (id!==renderId) return;
     try {
-      renderTask=paintPage(page,canvas,scale,Math.min(2,devicePixelRatio||1));
+      renderTask=paintWorkspacePage(page,canvas,scale,Math.min(2,devicePixelRatio||1));
       await renderTask?.promise;
     } catch(error) {
       if (error.name!=='RenderingCancelledException'&&id===renderId) {
@@ -231,7 +252,44 @@ function drawMarks(svg, page, interactive=false) {
   if (interactive&&drag?.draft) svg.append(svgMark(drag.draft,page,view));
 }
 
-function drawOverlay() { const page=current(); if (page) drawMarks(overlay,page,true); }
+async function findSourceRuns(page, entry, bytes) {
+  try {
+    textRuntime = await loadTextEngine();
+    entry.runs = listTextRuns(textRuntime, bytes, page.source);
+  } catch (error) {
+    entry.error = error;
+    console.warn(error);
+  }
+  if (current()?.proxy === page.proxy && tool === 'edit-text') {
+    updateControls();
+    drawOverlay();
+  }
+}
+
+function drawOverlay() {
+  const page=current();
+  if (!page) return;
+  drawMarks(overlay,page,true);
+  if (tool!=='edit-text'||!page.proxy) return;
+
+  let entry = sourceRuns.get(page.proxy);
+  if (!entry) {
+    entry = {};
+    sourceRuns.set(page.proxy, entry);
+    void findSourceRuns(page, entry, originalBytes);
+    return;
+  }
+  if (!entry.runs) return;
+  const view = viewOf(page);
+  const edits = new Map(page.textEdits?.map(edit => [edit.index, edit.value]));
+  for (const run of entry.runs) {
+    const points = run.corners.map(([x,y]) => view.convertToViewportPoint(x,y).join(',')).join(' ');
+    const target = el('polygon', { points, tabindex: 0, role: 'button',
+      'aria-label': `Edit text: ${edits.get(run.index) ?? run.value}` });
+    target.dataset.sourceText = run.index;
+    overlay.append(target);
+  }
+}
 
 function paintThumb(id) {
   const thumb=thumbs.get(id), page=state.pages.find(p=>p.id===id);
@@ -242,9 +300,13 @@ function paintThumb(id) {
   thumb.sheet.style.width=`${v.width*s}px`;
   thumb.svg.setAttribute('viewBox',`0 0 ${v.width} ${v.height}`);
   drawMarks(thumb.svg,page);
-  paintPage(page,thumb.canvas,s,1.5)?.promise.catch(error=>{
-    if (error.name!=='RenderingCancelledException'&&thumb.button.isConnected) console.warn(error);
-  });
+  try {
+    paintWorkspacePage(page,thumb.canvas,s,1.5)?.promise.catch(error=>{
+      if (error.name!=='RenderingCancelledException'&&thumb.button.isConnected) console.warn(error);
+    });
+  } catch (error) {
+    console.warn(error);
+  }
 }
 
 function paintVisibleThumbs() {
@@ -252,7 +314,7 @@ function paintVisibleThumbs() {
 }
 
 function updateThumbs() {
-  const signature=state.pages.map(p=>`${p.id}:${p.rotation}`).join(',');
+  const signature=state.pages.map(p=>`${p.id}:${p.rotation}:${p.textRevision??0}`).join(',');
   if (signature!==thumbsKey) {
     thumbsKey=signature; thumbs.clear(); thumbObserver?.disconnect();
     thumbObserver=new IntersectionObserver(entries=>{
@@ -287,14 +349,32 @@ function point(e) {
 
 function askText(data) {
   promptText=data;
-  $('text-title').textContent=data.id?'Edit text':'Add text';
-  $('text-submit').textContent=data.id?'Save text':'Place text';
+  $('text-title').textContent=data.sourceRun?'Edit existing text':data.id?'Edit text':'Add text';
+  $('text-submit').textContent=data.id||data.sourceRun?'Save text':'Place text';
+  $('source-text-help').hidden=!data.sourceRun;
   $('text-value').value=data.value??''; $('text-error').hidden=true;
   $('text-dialog').showModal(); $('text-value').focus();
 }
 
+function editSourceText(target) {
+  if (!editable()||tool!=='edit-text'||!target) return;
+  const page = current();
+  const sourceRun = sourceRuns.get(page.proxy)?.runs?.find(run => run.index === Number(target.dataset.sourceText));
+  if (!sourceRun) return;
+  const previous = page.textEdits?.find(edit => edit.index === sourceRun.index);
+  askText({ sourceRun, page, value: previous?.value ?? sourceRun.value });
+}
+
+overlay.addEventListener('click', e => editSourceText(e.target.closest('[data-source-text]')));
+overlay.addEventListener('keydown', e => {
+  const target = e.target.closest('[data-source-text]');
+  if (!target || (e.key !== 'Enter' && e.key !== ' ')) return;
+  e.preventDefault();
+  editSourceText(target);
+});
+
 overlay.addEventListener('pointerdown',e=>{
-  if (!editable()||e.button!==0||drag||!e.isPrimary) return;
+  if (!editable()||tool==='edit-text'||e.button!==0||drag||!e.isPrimary) return;
   const page=current(), [x,y]=point(e), angle=rotationOf(page);
   if (tool==='text') { askText({type:'text',angle,x,y,...prefs.text}); return; }
   if (tool==='select') {
@@ -350,6 +430,7 @@ async function confirmReplacement() {
 }
 
 async function loadPdf(file) {
+  if ($('text-dialog').open) return;
   if (busy || (file&&!/\.pdf$/i.test(file.name)&&file.type!=='application/pdf')) {
     if (!busy) notice('Choose a PDF file to open.',true);
     return;
@@ -388,7 +469,8 @@ async function download() {
   busy=true; drag=null; updateControls(); notice('Preparing your PDF…',false,0);
   const pages=state.pages;
   try {
-    const bytes=pages===originalPages?originalBytes:await exportPdf(originalBytes,pages);
+    const source=pages.some(page=>page.textEdits?.length)?rewriteText(textRuntime,originalBytes,pages):originalBytes;
+    const bytes=pages===originalPages?originalBytes:await exportPdf(source,pages);
     const url=URL.createObjectURL(new Blob([bytes],{type:'application/pdf'}));
     const link=document.createElement('a'); link.href=url; link.download=`${filename.replace(/\.pdf$/i,'')}-edited.pdf`;
     document.body.append(link); link.click(); link.remove();
@@ -433,6 +515,30 @@ $('text-form').addEventListener('submit',async e=>{
   const value=$('text-value').value.trim().replaceAll('\t','    ');
   if (!value) { $('text-error').textContent='Enter some text first.'; $('text-error').hidden=false; return; }
   const pending=promptText;
+  if (pending.sourceRun) {
+    if (value===pending.value) { $('text-dialog').close(); return; }
+    if (/\p{Cc}/u.test(value)) {
+      $('text-error').textContent='Enter a single line of text.';
+      $('text-error').hidden=false;
+      return;
+    }
+    const { page, sourceRun } = pending;
+    const textEdits = (page.textEdits ?? []).filter(edit => edit.index !== sourceRun.index);
+    if (value !== sourceRun.value) {
+      textEdits.push({ index: sourceRun.index, original: sourceRun.value, origin: sourceRun.origin, value });
+    }
+    const edited = { ...page, textEdits, textRevision: key() };
+    try {
+      rewriteText(textRuntime, originalBytes, [edited]);
+    } catch (error) {
+      $('text-error').textContent=error.message;
+      $('text-error').hidden=false;
+      return;
+    }
+    $('text-dialog').close();
+    changePage(edited);
+    return;
+  }
   try { await validateText(value); }
   catch { $('text-error').textContent='Some characters aren’t available in the built-in font. Try plain Latin text.'; $('text-error').hidden=false; return; }
   if (!$('text-dialog').open||promptText!==pending) return;
@@ -456,7 +562,7 @@ document.addEventListener('keydown',e=>{
   if (command&&k==='z') { e.preventDefault(); stepHistory(!e.shiftKey); return; }
   if (command&&k==='y') { e.preventDefault(); stepHistory(false); return; }
   if (command||e.altKey) return;
-  const shortcuts={v:'select',t:'text',d:'ink',h:'highlight',r:'shape',w:'whiteout'};
+  const shortcuts={v:'select',t:'text',e:'edit-text',d:'ink',h:'highlight',r:'shape',w:'whiteout'};
   if (shortcuts[k]) { e.preventDefault(); setTool(shortcuts[k]); }
   if (k==='escape') setTool('select');
   if (k==='delete'&&selected) { e.preventDefault(); deleteMark(); }

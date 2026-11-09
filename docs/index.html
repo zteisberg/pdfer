@@ -28,7 +28,8 @@
       <span class="divider sidebar-toggle"></span>
       <button class="tool active" data-tool="select" aria-pressed="true" title="Select (V)" disabled><i data-icon="cursor"></i><span>Select</span></button>
       <span class="divider"></span>
-      <button class="tool" data-tool="text" aria-pressed="false" title="Add text (T)" disabled><i data-icon="text"></i><span>Text</span></button>
+      <button class="tool" data-tool="text" aria-pressed="false" title="Add text (T)" aria-label="Add text" disabled><i data-icon="text"></i><span>Add text</span></button>
+      <button class="tool" data-tool="edit-text" aria-pressed="false" title="Edit existing text (E)" aria-label="Edit existing text" disabled><i data-icon="edit-text"></i><span>Edit text</span></button>
       <button class="tool" data-tool="ink" aria-pressed="false" title="Draw (D)" disabled><i data-icon="pen"></i><span>Draw</span></button>
       <button class="tool" data-tool="highlight" aria-pressed="false" title="Highlight (H)" disabled><i data-icon="highlight"></i><span>Highlight</span></button>
       <button class="tool" data-tool="shape" aria-pressed="false" title="Rectangle (R)" disabled><i data-icon="square"></i><span>Shape</span></button>
@@ -125,6 +126,7 @@
       <h2 id="text-title">Add text</h2>
       <label for="text-value">Text to place on the page</label>
       <textarea id="text-value" rows="4" maxlength="1000" required></textarea>
+      <p id="source-text-help" hidden>Edits replace one text run in place. Longer text may overlap nearby content. If the original font lacks a glyph, Paperwork tries Noto Sans.</p>
       <p id="text-error" class="form-error" role="alert" hidden></p>
       <div class="dialog-actions"><button id="text-cancel" type="button" class="button quiet">Cancel</button><button class="button primary" type="submit" id="text-submit">Place text</button></div>
     </form>

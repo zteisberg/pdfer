@@ -51,11 +51,15 @@ export function viewMatrix(from, to) {
   return [ax-x,ay-y,bx-x,by-y,x,y].map(value => +value.toFixed(8));
 }
 
-export function paintPage(page, canvas, scale, pixelRatio = 1) {
+export function paintPage(page, canvas, scale, pixelRatio = 1, paintContent) {
   const viewport = viewOf(page, rotationOf(page), scale);
   const ratio = Math.min(pixelRatio, 4096 / Math.max(viewport.width, viewport.height));
   canvas.width = Math.max(1, Math.ceil(viewport.width * ratio));
   canvas.height = Math.max(1, Math.ceil(viewport.height * ratio));
+  if (paintContent) {
+    paintContent();
+    return null;
+  }
   if (!page.proxy) {
     const ctx = canvas.getContext('2d');
     ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
