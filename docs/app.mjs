@@ -1,5 +1,5 @@
-import './icons.mjs';
-import { openPdf, closePdf, makeSample, rotationOf, viewOf, viewMatrix, mapPoint, paintPage, validateText, exportPdf, BASELINE, LINE_HEIGHT } from './pdf.mjs';
+import './icons.mjs?v=1.1.0';
+import { openPdf, closePdf, makeSample, rotationOf, viewOf, viewMatrix, mapPoint, paintPage, validateText, exportPdf, BASELINE, LINE_HEIGHT } from './pdf.mjs?v=1.1.0';
 import { loadTextEngine, listTextRuns, paintEditedPage, rewriteText } from './text-edit.mjs';
 
 const $ = id => document.getElementById(id);
